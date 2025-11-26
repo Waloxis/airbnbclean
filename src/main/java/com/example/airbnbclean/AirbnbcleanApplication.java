@@ -15,6 +15,7 @@ public class AirbnbcleanApplication {
         return "Hello World!";
     }
 
+
 	public static void main(String[] args) {
 		SpringApplication.run(AirbnbcleanApplication.class, args);
 	}
