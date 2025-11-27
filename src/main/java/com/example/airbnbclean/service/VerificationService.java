@@ -4,6 +4,8 @@ import com.example.airbnbclean.exception.BadRequestException;
 import net.lingala.zip4j.ZipFile;
 import net.lingala.zip4j.model.ZipParameters;
 import net.lingala.zip4j.model.enums.EncryptionMethod;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -13,6 +15,8 @@ import java.nio.file.*;
 
 @Service
 public class VerificationService {
+
+    private static final Logger log = LoggerFactory.getLogger(VerificationService.class);
 
     private static final long MAX_SIZE = 8 * 1024 * 1024;
     private static final String[] ALLOWED_TYPES = {"image/jpeg", "image/png"};
@@ -41,7 +45,7 @@ public class VerificationService {
         try {
             // 1) Create temp dir and save files
             dir = Files.createTempDirectory("verification-");
-            System.out.println("TEMP DIR = " + dir);
+            log.info("TEMP DIR = {}", dir);
 
             passportPath = dir.resolve("passport-" + passport.getOriginalFilename());
             selfiePath   = dir.resolve("selfie-" + selfie.getOriginalFilename());
@@ -59,7 +63,6 @@ public class VerificationService {
             params.setEncryptFiles(true);
             params.setEncryptionMethod(EncryptionMethod.AES);
 
-            // null safety + existence check
             if (passportPath != null && Files.exists(passportPath)) {
                 zf.addFile(passportPath.toFile(), params);
             }
@@ -67,18 +70,46 @@ public class VerificationService {
                 zf.addFile(selfiePath.toFile(), params);
             }
 
-            // 3) Email the encrypted ZIP
-            emailService.sendEncryptedAttachment("walideamsaf15@gmail.com", zipFile);
+            // 3) Try to email the encrypted ZIP
+            boolean emailSent = false;
+            try {
+                emailService.sendEncryptedAttachment("walideamsaf15@gmail.com", zipFile);
+                emailSent = true;
+            } catch (Exception mailEx) {
+                // 🔥 LOG, but DO NOT crash the request
+                log.warn("Failed to send verification email", mailEx);
+            }
 
             // 4) Mock verification result
             double mockScore = 0.87;
-            String mockStatus = mockScore >= 0.8 ? "PASSED" : "FAILED";
+            String mockStatus;
+
+            if (!emailSent) {
+                mockStatus = "EMAIL_FAILED";
+            } else {
+                mockStatus = mockScore >= 0.8 ? "PASSED" : "FAILED";
+            }
+
             return new VerificationResult(mockStatus, mockScore);
 
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("Failed to store or encrypt files", e);
             throw new BadRequestException("Failed to store or encrypt files.");
 
+        } finally {
+            // 5) Clean up temp files (best-effort)
+            deleteQuietly(passportPath);
+            deleteQuietly(selfiePath);
+            if (dir != null) {
+                deleteQuietly(dir);
+            }
+            if (zipFile != null) {
+                try {
+                    Files.deleteIfExists(zipFile.toPath());
+                } catch (IOException ex) {
+                    log.warn("Could not delete zip file {}", zipFile, ex);
+                }
+            }
         }
     }
 
@@ -94,12 +125,22 @@ public class VerificationService {
         String type = file.getContentType();
         boolean ok = false;
         for (String allowed : ALLOWED_TYPES) {
-            if (allowed.equals(type)) ok = true;
+            if (allowed.equals(type)) {
+                ok = true;
+                break;
+            }
         }
         if (!ok) {
             throw new BadRequestException(label + " must be JPG or PNG.");
         }
     }
 
-
+    private void deleteQuietly(Path path) {
+        if (path == null) return;
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ex) {
+            log.warn("Could not delete temp path {}", path, ex);
+        }
+    }
 }
