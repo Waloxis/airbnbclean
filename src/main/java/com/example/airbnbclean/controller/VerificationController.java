@@ -29,7 +29,7 @@ public class VerificationController {
                 true,
                 result.getStatus(),
                 result.getScore(),
-                "Verification finished (mock)."
+                "Verification finished."
         );
     }
 
